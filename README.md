@@ -13,7 +13,6 @@ U-Net brain-tumor segmentation (LGG MRI) -> slice-wise centroids -> 3D nanobot n
 | `tools/run_nav.py` | Python version of the static/dynamic pursuit maths |
 | `unity_demo/` | Unity toy demo scripts (synthetic cells) |
 | `paper/` | Project report, IEEE-format paper, presentation |
-| `docs/` | Detailed explanations (AI model, code, report, slides, literature review) |
 
 ## Quick start
 Open `simulators/nanobot_targeting_simulator.html`, click **Load centroids JSON** and pick a file from `data/sim_data/`. The simulators load Three.js from a CDN, so they need an internet connection.

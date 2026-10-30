@@ -1,0 +1,683 @@
+<title>Nanobot Targeting Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: radiology-workstation console. 3D viewport on the left, instrument panel on the right; stacks on phones. Deliberately dark (reading-room look). */
+:root {
+  color-scheme: dark;
+  --bg: #0b0f14;          /* reading-room black, blue-biased */
+  --panel: #121820;
+  --line: #222c38;
+  --fg: #dfe6ee;
+  --muted: #8693a3;
+  --tumor: #f2a541;       /* amber: segmented tumor */
+  --static: #ff7a6b;      /* coral: static-target path */
+  --dynamic: #4fd1e8;     /* cyan: dynamic tracking path */
+  --avoid: #b79cff;       /* violet: obstacle-aware path */
+  --danger: #ff5470;
+  --good: #57d19a;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+}
+.app {
+  display: grid; grid-template-rows: auto auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 16px; gap: 12px; box-sizing: border-box;
+}
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+h1 {
+  font-family: var(--font-display); font-weight: 600; font-size: 1.35rem;
+  letter-spacing: 0.01em; margin: 0; text-wrap: balance;
+}
+.sub { color: var(--muted); font-size: 0.85rem; }
+.chip {
+  font-family: var(--font-mono); font-size: 0.75rem; color: var(--tumor);
+  border: 1px solid color-mix(in srgb, var(--tumor) 45%, transparent);
+  padding: 2px 8px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; height: calc(100dvh - 76px); min-height: 600px; }
+.viewport {
+  position: relative; background: #070a0e; border: 1px solid var(--line); border-radius: 4px;
+  overflow: hidden; min-height: 360px;
+}
+.viewport canvas { display: block; width: 100%; height: 100%; }
+.hud, .legend, .hint { user-select: none; -webkit-user-select: none; }
+.hud {
+  position: absolute; left: 12px; top: 10px; pointer-events: none;
+  font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted);
+  display: grid; gap: 2px; font-variant-numeric: tabular-nums;
+}
+.hud b { color: var(--fg); font-weight: 500; }
+.legend {
+  position: absolute; left: 12px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px 14px;
+  font-size: 0.75rem; color: var(--muted); pointer-events: none;
+}
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.empty {
+  position: absolute; inset: 16px; display: grid; place-content: center; justify-items: center; gap: 12px;
+  text-align: center; color: var(--muted); border: 1px dashed #2d3a49; border-radius: 6px; background: var(--bg);
+}
+.empty p { margin: 0; font-size: 0.95rem; max-width: 34ch; }
+.empty .big { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; color: var(--fg); }
+.viewport.drag .empty, .viewport.drag { border-color: var(--dynamic); }
+.dropmsg { position: absolute; inset: 0; display: grid; place-content: center; background: color-mix(in srgb, var(--dynamic) 12%, transparent); color: var(--fg); font-weight: 600; pointer-events: none; }
+.hint { position: absolute; right: 12px; bottom: 10px; font-size: 0.72rem; color: var(--muted); pointer-events: none; }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  overflow-y: auto; min-height: 0; display: flex; flex-direction: column;
+}
+.panel section { padding: 14px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+.panel section:last-child { border-bottom: 0; }
+h2 {
+  font-family: var(--font-display); font-weight: 500; font-size: 0.72rem; margin: 0;
+  text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted);
+}
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button, .filebtn {
+  font: 500 0.82rem var(--font-body); color: var(--fg); background: #1a222d;
+  border: 1px solid var(--line); border-radius: 4px; padding: 7px 12px; cursor: pointer;
+}
+button:hover, .filebtn:hover { border-color: #3a4757; }
+button:focus-visible, .filebtn:focus-within, input:focus-visible, select:focus-visible { outline: 2px solid var(--dynamic); outline-offset: 2px; }
+button.primary { background: var(--dynamic); color: #04161b; border-color: var(--dynamic); min-width: 84px; }
+.filebtn input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.note { font-size: 0.78rem; color: var(--muted); margin: 0; }
+.note code { font-family: var(--font-mono); font-size: 0.74rem; color: var(--fg); }
+.err { color: var(--danger); font-size: 0.8rem; margin: 0; }
+
+.modes { display: grid; gap: 6px; }
+.mode { display: flex; align-items: center; gap: 10px; font-size: 0.86rem; cursor: pointer; }
+.mode input { accent-color: var(--c); width: 16px; height: 16px; margin: 0; }
+.mode .sw { width: 22px; height: 3px; background: var(--c); border-radius: 2px; }
+.mode small { color: var(--muted); margin-left: auto; font-size: 0.74rem; }
+
+.ctl { display: grid; grid-template-columns: 92px minmax(0,1fr) 52px; align-items: center; gap: 8px; font-size: 0.8rem; }
+.ctl label { color: var(--muted); }
+.ctl output { font-family: var(--font-mono); font-size: 0.76rem; text-align: right; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--dynamic); margin: 0; }
+select { font: 0.8rem var(--font-body); background: #1a222d; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+thead th { font-family: var(--font-display); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.04em; }
+td { font-family: var(--font-mono); }
+td.best { color: var(--good); }
+td.bad { color: var(--danger); }
+th.c-static { color: var(--static); } th.c-dynamic { color: var(--dynamic); } th.c-avoid { color: var(--avoid); }
+
+/* method section below the console */
+.about {
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 56px; border-top: 1px solid var(--line); display: grid; gap: 40px;
+  max-width: 1180px; margin: 0 auto;
+}
+.about h3 { font-family: var(--font-display); font-weight: 600; font-size: 1.25rem; margin: 0 0 6px; text-wrap: balance; }
+.about .lead { color: var(--muted); max-width: 68ch; margin: 0; }
+.pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; margin-top: 18px; counter-reset: st; }
+.stage { padding: 14px 16px 16px; border-left: 1px solid var(--line); display: grid; gap: 6px; align-content: start; min-width: 0; }
+.stage:first-child { border-left: 0; padding-left: 0; }
+.stage .n { font-family: var(--font-mono); font-size: 0.72rem; color: var(--tumor); }
+.stage b { font-weight: 600; font-size: 0.92rem; }
+.stage span { color: var(--muted); font-size: 0.82rem; }
+.strategies { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+.strat { border-top: 2px solid var(--c); padding-top: 12px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.strat b { color: var(--c); font-weight: 600; }
+.strat p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.strat code, .fmt code { font-family: var(--font-mono); font-size: 0.78rem; color: var(--fg); }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+.deflist { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 14px 0 0; font-size: 0.85rem; }
+.deflist dt { font-family: var(--font-mono); font-size: 0.78rem; color: var(--fg); }
+.deflist dd { margin: 0; color: var(--muted); }
+pre.fmt { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px; margin: 14px 0 0; overflow-x: auto; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6; color: var(--fg); }
+.foot { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 860px) {
+  .main { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+  .pipeline { grid-template-columns: minmax(0, 1fr); }
+  .stage { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; }
+  .stage:first-child { border-top: 0; }
+  .strategies, .two { grid-template-columns: minmax(0, 1fr); }
+  .viewport { height: 62vh; min-height: 340px; }
+  .panel { overflow: visible; }
+  .hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Nanobot Targeting Simulator</h1>
+    <span class="chip" id="patientChip">No patient loaded</span>
+    <span class="sub">U-Net tumor centroids → 3D pursuit through the MRI slice stack</span>
+  </header>
+
+  <div class="main">
+    <div class="viewport" id="viewport">
+      <div class="hud">
+        <div>STEP <b id="hudStep">0</b> / <span id="hudMax">0</span></div>
+        <div>SLICE <b id="hudSlice">0</b> / <span id="hudSlices">0</span></div>
+        <div>TUMOR SLICES <b id="hudTumor">0</b></div>
+      </div>
+      <div class="legend">
+        <span style="--c: var(--tumor)">Tumor (per-slice)</span>
+        <span style="--c: var(--danger)">Critical structure</span>
+        <span style="--c: #ffffff">Entry point</span>
+      </div>
+      <div class="hint">Drag to orbit · scroll to zoom · right-drag to pan</div>
+      <div class="empty" id="emptyState">
+        <p class="big">No patient loaded</p>
+        <p>Drop a <code>sim_data_&lt;patient&gt;.json</code> file here, or choose one from your computer.</p>
+        <label class="filebtn">Choose file<input type="file" id="fileInput2" accept=".json,application/json"></label>
+      </div>
+      <div class="dropmsg" id="dropMsg" hidden>Drop to load patient</div>
+    </div>
+
+    <aside class="panel">
+      <section>
+        <h2>Patient data</h2>
+        <div class="row">
+          <label class="filebtn">Load centroids JSON
+            <input type="file" id="fileInput" accept=".json,application/json">
+          </label>
+        </div>
+        <p class="note" id="dataNote">Choose a <code>sim_data_&lt;patient&gt;.json</code> file exported from the notebook.</p>
+        <p class="err" id="dataErr" hidden></p>
+      </section>
+
+      <section>
+        <h2>Navigation strategies</h2>
+        <div class="modes">
+          <label class="mode" style="--c: var(--static)"><input type="checkbox" id="m-static" checked><span class="sw"></span>Static target<small>aim at mean centroid</small></label>
+          <label class="mode" style="--c: var(--dynamic)"><input type="checkbox" id="m-dynamic" checked><span class="sw"></span>Dynamic tracking<small>follow each slice</small></label>
+          <label class="mode" style="--c: var(--avoid)"><input type="checkbox" id="m-avoid" checked><span class="sw"></span>Obstacle-aware<small>tracking + repulsion</small></label>
+        </div>
+        <div class="row">
+          <button class="primary" id="playBtn" type="button">Play</button>
+          <button id="resetBtn" type="button">Restart</button>
+          <select id="rate" aria-label="Playback rate">
+            <option value="15">15 steps/s</option>
+            <option value="40" selected>40 steps/s</option>
+            <option value="100">100 steps/s</option>
+          </select>
+        </div>
+        <div class="ctl"><label for="scrub">Timeline</label><input type="range" id="scrub" min="0" max="100" value="100"><output id="scrubOut">end</output></div>
+      </section>
+
+      <section>
+        <h2>Comparison</h2>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th></th><th class="c-static">Static</th><th class="c-dynamic">Dynamic</th><th class="c-avoid">Avoid</th></tr></thead>
+            <tbody id="metricsBody"></tbody>
+          </table>
+        </div>
+        <p class="note">Units are voxels (pixel and slice index), the same space as the notebook metrics. Green marks the best value per row; red marks a path that enters a critical structure.</p>
+      </section>
+
+      <section>
+        <h2>Entry point &amp; motion</h2>
+        <div class="ctl"><label for="sz">Entry slice</label><input type="range" id="sz" min="0" max="40" value="0"><output id="szOut">0</output></div>
+        <div class="ctl"><label for="sx">Entry x</label><input type="range" id="sx" min="0" max="255" value="128"><output id="sxOut">128</output></div>
+        <div class="ctl"><label for="sy">Entry y</label><input type="range" id="sy" min="0" max="255" value="128"><output id="syOut">128</output></div>
+        <div class="ctl"><label for="spd">Step size</label><input type="range" id="spd" min="0.5" max="3" step="0.1" value="1.5"><output id="spdOut">1.5</output></div>
+        <div class="ctl"><label for="rep">Repulsion</label><input type="range" id="rep" min="0" max="20" step="0.5" value="10"><output id="repOut">10</output></div>
+        <p class="note">Defaults match the notebook: entry at slice 0, image centre (128, 128), step size 1.5.</p>
+      </section>
+
+      <section>
+        <h2>Display</h2>
+        <div class="ctl"><label for="zs">Slice spacing</label><input type="range" id="zs" min="1" max="5" step="0.5" value="2.5"><output id="zsOut">2.5</output></div>
+        <label class="mode" style="--c: var(--danger)"><input type="checkbox" id="showObs" checked>Show critical structures</label>
+        <label class="mode" style="--c: var(--dynamic)"><input type="checkbox" id="showPlane" checked>Show current slice plane</label>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<div class="about">
+  <div>
+    <h3>How the simulation works</h3>
+    <p class="lead">Each patient file holds the tumor that the U-Net segmented on every MRI slice. The simulator stacks those slices into a 3D volume and sends three nanobots from the same entry point to the tumor, each with a different navigation strategy.</p>
+    <div class="pipeline">
+      <div class="stage"><span class="n">01</span><b>MRI slices</b><span>FLAIR brain slices from the LGG dataset, resized to 256 × 256.</span></div>
+      <div class="stage"><span class="n">02</span><b>U-Net segmentation</b><span>Per-pixel tumor probability, thresholded at 0.5 into a binary mask.</span></div>
+      <div class="stage"><span class="n">03</span><b>Centroid extraction</b><span>Image moments give each slice&rsquo;s tumor centre (x, y) and area.</span></div>
+      <div class="stage"><span class="n">04</span><b>3D target path</b><span>Centroids ordered by slice index form the tumor&rsquo;s path through the volume.</span></div>
+      <div class="stage"><span class="n">05</span><b>Nanobot navigation</b><span>Three pursuit strategies move toward the target, 1.5 voxels per step.</span></div>
+    </div>
+  </div>
+
+  <div>
+    <h3>Navigation strategies</h3>
+    <div class="strategies">
+      <div class="strat" style="--c: var(--static)"><b>Static target</b>
+        <p>Moves in a straight line to the mean of all tumor centroids. It is the shortest route, but it ends at the tumor&rsquo;s average position rather than on tissue that was actually segmented.</p>
+        <p><code>p &larr; p + s &middot; (t &minus; p) / |t &minus; p|</code></p></div>
+      <div class="strat" style="--c: var(--dynamic)"><b>Dynamic tracking</b>
+        <p>Visits each slice&rsquo;s centroid in order and moves on once within 1 voxel. It follows the tumor&rsquo;s real shape, at the cost of a longer path.</p>
+        <p><code>for each c[i]: pursue c[i] until |c[i] &minus; p| &lt; 1</code></p></div>
+      <div class="strat" style="--c: var(--avoid)"><b>Obstacle-aware</b>
+        <p>Dynamic tracking plus a repulsive field around critical structures. The repulsion fades as the bot nears its waypoint, which stops it getting trapped next to an obstacle.</p>
+        <p><code>u = dir(t) + k &middot; f &middot; &Sigma; (p &minus; o) / |p &minus; o|&sup2;</code></p></div>
+    </div>
+  </div>
+
+  <div class="two">
+    <div>
+      <h3>Comparison metrics</h3>
+      <dl class="deflist">
+        <dt>Path length</dt><dd>Total distance travelled, in voxels.</dd>
+        <dt>Steps</dt><dd>Number of moves until the strategy finishes.</dd>
+        <dt>Final distance</dt><dd>Distance from the end point to the nearest segmented centroid.</dd>
+        <dt>Slices visited</dt><dd>Tumor slices the bot passed within 1 voxel of.</dd>
+        <dt>Min clearance</dt><dd>Closest approach to a critical structure&rsquo;s surface. A negative value means the path entered it.</dd>
+      </dl>
+      <p class="lead" style="margin-top:14px">Critical structures are simulated: three spheres placed along the entry-to-tumor route to test avoidance. They are not segmented from the MRI.</p>
+    </div>
+    <div>
+      <h3>Patient file format</h3>
+      <p class="lead">Exported by the notebook, one file per validation patient.</p>
+<pre class="fmt">{
+  "patient": "TCGA_DU_7010_19860307",
+  "n_slices": 88,
+  "img_size": 256,
+  "centroids": [
+    [slice, x, y, area_px],
+    ...
+  ],
+  "metrics": { "dice": 0.8275 }
+}</pre>
+    </div>
+  </div>
+
+  <p class="foot">Data: LGG MRI Segmentation (Buda et al., TCGA/TCIA), Kaggle. Segmentation: U-Net trained with Dice + BCE loss. Part of &ldquo;Deep Learning-Guided Nanorobotic Targeting for Precision Oncology&rdquo;.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+"use strict";
+
+/* ---------- 1. Data format ---------- */
+// Loaded from the notebook export: centroids = [slice, x, y, area_px]
+
+/* ---------- 2. Simulation (same maths as the Python notebook) ---------- */
+// Points live in data space: [z = slice index, x = column px, y = row px]
+const sub = (a,b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const add = (a,b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+const mul = (a,s) => [a[0]*s, a[1]*s, a[2]*s];
+const norm = a => Math.hypot(a[0], a[1], a[2]);
+
+// one pursuit step: identical to Nanobot3D.step in Python
+function step(pos, target, speed) {
+  const d = sub(target, pos), dist = norm(d);
+  const next = dist < speed ? target.slice() : add(pos, mul(d, speed / dist));
+  return { next, dist };
+}
+
+// static: straight to the mean centroid (simulate_3d_targeting)
+function simulateStatic(start, target, speed, maxSteps = 200) {
+  let pos = start.slice(); const traj = [pos];
+  for (let i = 0; i < maxSteps; i++) {
+    const { next, dist } = step(pos, target, speed);
+    pos = next; traj.push(pos);
+    if (dist < 1.0) break;
+  }
+  return traj;
+}
+
+// dynamic: chase each per-slice centroid in order (simulate_dynamic_targeting)
+function simulateDynamic(start, waypoints, speed, arrive = 1.0, maxPer = 100) {
+  let pos = start.slice(); const traj = [pos];
+  for (const wp of waypoints) {
+    for (let i = 0; i < maxPer; i++) {
+      const { next, dist } = step(pos, wp, speed);
+      pos = next; traj.push(pos);
+      if (dist < arrive) break;
+    }
+  }
+  return traj;
+}
+
+// obstacle-aware: dynamic tracking + repulsive field (step_with_avoidance)
+function simulateAvoid(start, waypoints, obstacles, speed, strength, influence, arrive = 1.0, maxPer = 200) {
+  let pos = start.slice(); const traj = [pos];
+  for (const wp of waypoints) {
+    for (let i = 0; i < maxPer; i++) {
+      const d = sub(wp, pos), dist = norm(d);
+      if (dist < speed) { pos = wp.slice(); traj.push(pos); break; }
+      let move = mul(d, 1 / dist);
+      // fade repulsion near the target so the field cannot trap the bot (local-minimum fix)
+      const fade = Math.min(1, dist / influence);
+      for (const o of obstacles) {
+        const v = sub(pos, o.p), od = norm(v);
+        if (od > 0 && od < influence) move = add(move, mul(v, fade * strength / (od * od)));
+      }
+      const m = norm(move);
+      if (m === 0) move = [0, 1, 0]; else move = mul(move, 1 / m);
+      pos = add(pos, mul(move, speed)); traj.push(pos);
+      if (dist < arrive) break;
+    }
+  }
+  return traj;
+}
+
+function pathLength(t) { let s = 0; for (let i = 1; i < t.length; i++) s += norm(sub(t[i], t[i-1])); return s; }
+function finalDist(t, pts) { const f = t[t.length-1]; return Math.min(...pts.map(p => norm(sub(p, f)))); }
+function minClearance(t, obs) {
+  if (!obs.length) return Infinity;
+  let m = Infinity;
+  for (const p of t) for (const o of obs) m = Math.min(m, norm(sub(p, o.p)) - o.r);
+  return m;
+}
+
+// simulated critical structures placed along the entry → first-target leg
+function makeObstacles(start, first) {
+  const leg = sub(first, start), L = norm(leg);
+  if (L < 20) return [];
+  // perpendicular offset so the field does not cancel exactly on the axis
+  let perp = [0, -leg[2], leg[1]]; if (norm(perp) < 1e-6) perp = [0, 1, 0];
+  perp = mul(perp, 1 / norm(perp));
+  return [0.3, 0.5, 0.7].map((f, i) => ({
+    p: add(add(start, mul(leg, f)), mul(perp, i === 1 ? -2 : 2)),
+    r: 6
+  }));
+}
+
+/* ---------- 3. Three.js scene ---------- */
+const COLORS = { static: 0xff7a6b, dynamic: 0x4fd1e8, avoid: 0xb79cff, tumor: 0xf2a541, danger: 0xff5470 };
+const vp = document.getElementById("viewport");
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+} catch (e) {
+  vp.insertAdjacentHTML("beforeend", '<p class="err" style="padding:16px">WebGL is unavailable in this browser, so the 3D view cannot render.</p>');
+  return;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x070a0e);
+vp.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 5000);
+camera.position.set(230, 150, 250);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(200, 300, 200); scene.add(key);
+
+let world = new THREE.Group(); scene.add(world);
+const state = {
+  data: null, zScale: 2.5, trajs: {}, obstacles: [], playhead: Infinity, playing: false,
+  lines: {}, bots: {}, plane: null, maxLen: 0, needsFrame: true
+};
+
+// data-space [z,x,y] → world: x right, image rows up, slices along depth
+function W(p) {
+  const zc = (state.data.n_slices - 1) / 2, h = state.data.img_size / 2;
+  return new THREE.Vector3(p[1] - h, -(p[2] - h), (p[0] - zc) * state.zScale);
+}
+
+function lineFrom(points, color, opacity = 1, dashed = false) {
+  const g = new THREE.BufferGeometry().setFromPoints(points);
+  const m = dashed
+    ? new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: 4, gapSize: 3 })
+    : new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  const l = new THREE.Line(g, m); if (dashed) l.computeLineDistances(); return l;
+}
+
+function buildScene() {
+  scene.remove(world); world = new THREE.Group(); scene.add(world);
+  const d = state.data, zc = (d.n_slices - 1) / 2, zs = state.zScale;
+
+  // brain shell drawn as stacked axial contour rings (one per few slices)
+  const rx = 70, ry = 86, rz = Math.max(zc * zs * 0.98, 10);
+  for (let s = 0; s < d.n_slices; s += Math.max(1, Math.round(d.n_slices / 22))) {
+    const z = (s - zc) * zs, k = 1 - (z / rz) ** 2;
+    if (k <= 0.02) continue;
+    const pts = [];
+    for (let a = 0; a <= 64; a++) {
+      const t = a / 64 * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(t) * rx * Math.sqrt(k), Math.sin(t) * ry * Math.sqrt(k), z));
+    }
+    world.add(lineFrom(pts, 0x5d7189, 0.28));
+  }
+
+  // tumor: one ellipsoid per slice sized from the segmented area
+  const tumorMat = new THREE.MeshStandardMaterial({ color: COLORS.tumor, transparent: true, opacity: 0.32, roughness: 0.6, emissive: 0x3a2200, depthWrite: false });
+  const sph = new THREE.SphereGeometry(1, 20, 14);
+  for (const c of d.centroids) {
+    const r = Math.max(2, Math.sqrt((c[3] || 200) / Math.PI));
+    const m = new THREE.Mesh(sph, tumorMat);
+    m.position.copy(W(c)); m.scale.set(r, r, zs * 0.45); world.add(m);
+  }
+  world.add(lineFrom(d.centroids.map(W), COLORS.tumor, 0.9));
+
+  // critical structures
+  const obsGroup = new THREE.Group(); obsGroup.name = "obstacles";
+  for (const o of state.obstacles) {
+    const core = new THREE.Mesh(new THREE.SphereGeometry(o.r, 20, 14),
+      new THREE.MeshStandardMaterial({ color: COLORS.danger, transparent: true, opacity: 0.7, roughness: 0.5 }));
+    core.position.copy(W(o.p));
+    obsGroup.add(core);
+  }
+  obsGroup.visible = document.getElementById("showObs").checked;
+  world.add(obsGroup);
+
+  // entry marker
+  const entry = new THREE.Mesh(new THREE.OctahedronGeometry(3.2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  entry.position.copy(W(state.start)); world.add(entry);
+
+  // current slice plane
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(170, 206),
+    new THREE.MeshBasicMaterial({ color: COLORS.dynamic, transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false }));
+  const planeEdge = new THREE.LineSegments(new THREE.EdgesGeometry(plane.geometry), new THREE.LineBasicMaterial({ color: COLORS.dynamic, transparent: true, opacity: 0.25 }));
+  plane.add(planeEdge); plane.visible = document.getElementById("showPlane").checked;
+  world.add(plane); state.plane = plane;
+
+  // paths + bots
+  state.lines = {}; state.bots = {};
+  for (const k of ["static", "dynamic", "avoid"]) {
+    const t = state.trajs[k]; if (!t) continue;
+    const ghost = lineFrom(t.map(W), COLORS[k], 0.18, k === "static");
+    const live = lineFrom(t.map(W), COLORS[k], 1, k === "static");
+    const bot = new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 12), new THREE.MeshBasicMaterial({ color: COLORS[k] }));
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(5, 16, 12), new THREE.MeshBasicMaterial({ color: COLORS[k], transparent: true, opacity: 0.18, depthWrite: false }));
+    bot.add(halo);
+    world.add(ghost, live, bot);
+    state.lines[k] = { ghost, live, n: t.length }; state.bots[k] = bot;
+  }
+  applyVisibility(); renderPlayhead();
+  if (state.needsFrame) { frameCamera(); state.needsFrame = false; }
+}
+
+// point the camera at the entry point, tumor and paths instead of the whole volume
+function frameCamera() {
+  const box = new THREE.Box3();
+  for (const k in state.trajs) for (const p of state.trajs[k]) box.expandByPoint(W(p));
+  for (const c of state.data.centroids) box.expandByPoint(W(c));
+  const c = box.getCenter(new THREE.Vector3()), size = Math.max(box.getSize(new THREE.Vector3()).length(), 60);
+  controls.target.copy(c);
+  camera.position.copy(c).add(new THREE.Vector3(1.1, 0.55, 0.9).normalize().multiplyScalar(size * 2.6));
+  controls.update();
+}
+
+/* ---------- 4. Run everything ---------- */
+function readNum(id) { return parseFloat(document.getElementById(id).value); }
+
+function run() {
+  const d = state.data;
+  if (!d) return;
+  const pts = d.centroids.map(c => [c[0], c[1], c[2]]);
+  state.start = [readNum("sz"), readNum("sx"), readNum("sy")];
+  const speed = readNum("spd"), strength = readNum("rep");
+  const target = [0, 1, 2].map(i => pts.reduce((s, p) => s + p[i], 0) / pts.length);
+  state.obstacles = makeObstacles(state.start, pts[0]);
+  state.trajs = {
+    static: simulateStatic(state.start, target, speed),
+    dynamic: simulateDynamic(state.start, pts, speed),
+    avoid: simulateAvoid(state.start, pts, state.obstacles, speed, strength, 16)
+  };
+  state.target = target;
+  state.maxLen = Math.max(...Object.values(state.trajs).map(t => t.length));
+  const scrub = document.getElementById("scrub"); scrub.max = state.maxLen - 1;
+  if (!state.playing) state.playhead = state.maxLen - 1;
+  else state.playhead = Math.min(state.playhead, state.maxLen - 1);
+  document.getElementById("hudMax").textContent = state.maxLen - 1;
+  document.getElementById("hudSlices").textContent = d.n_slices;
+  document.getElementById("hudTumor").textContent = d.centroids.length;
+  writeMetrics(pts);
+  buildScene();
+}
+
+function writeMetrics(pts) {
+  const keys = ["static", "dynamic", "avoid"];
+  const rows = [
+    { label: "Path length", fn: t => pathLength(t), fmt: v => v.toFixed(1), better: "low" },
+    { label: "Steps", fn: t => t.length - 1, fmt: v => String(v), better: "low" },
+    { label: "Final distance to tumor", fn: t => finalDist(t, pts), fmt: v => v.toFixed(2), better: "low" },
+    { label: "Tumor slices visited", fn: t => pts.filter(p => t.some(q => norm(sub(q, p)) < 1.01)).length, fmt: v => `${v}/${pts.length}`, better: "high" },
+    { label: "Min clearance to critical structure", fn: t => minClearance(t, state.obstacles), fmt: v => isFinite(v) ? v.toFixed(1) : "–", better: "high", danger: v => v < 0 }
+  ];
+  const body = document.getElementById("metricsBody"); body.innerHTML = "";
+  for (const r of rows) {
+    const vals = keys.map(k => r.fn(state.trajs[k]));
+    const finite = vals.filter(isFinite);
+    const best = finite.length ? (r.better === "low" ? Math.min(...finite) : Math.max(...finite)) : null;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.label}</td>` + vals.map(v => {
+      let cls = "";
+      if (r.danger && r.danger(v)) cls = "bad";
+      else if (best !== null && Math.abs(v - best) < 1e-9 && new Set(finite.map(x => x.toFixed(4))).size > 1) cls = "best";
+      return `<td class="${cls}">${r.fmt(v)}</td>`;
+    }).join("");
+    body.appendChild(tr);
+  }
+}
+
+function renderPlayhead() {
+  if (!state.data) return;
+  const ph = Math.floor(Math.min(state.playhead, state.maxLen - 1));
+  for (const k in state.lines) {
+    const L = state.lines[k], i = Math.min(ph, L.n - 1);
+    L.live.geometry.setDrawRange(0, i + 1);
+    state.bots[k].position.copy(W(state.trajs[k][i]));
+  }
+  // slice plane follows the dynamic bot (or whichever is visible)
+  const lead = ["dynamic", "avoid", "static"].find(k => document.getElementById("m-" + k).checked) || "dynamic";
+  const t = state.trajs[lead], p = t[Math.min(ph, t.length - 1)];
+  if (state.plane) state.plane.position.z = W(p).z;
+  document.getElementById("hudStep").textContent = ph;
+  document.getElementById("hudSlice").textContent = p[0].toFixed(1);
+  document.getElementById("scrub").value = ph;
+  document.getElementById("scrubOut").textContent = ph >= state.maxLen - 1 ? "end" : ph;
+}
+
+function applyVisibility() {
+  for (const k of ["static", "dynamic", "avoid"]) {
+    const on = document.getElementById("m-" + k).checked;
+    if (state.lines[k]) { state.lines[k].ghost.visible = on; state.lines[k].live.visible = on; state.bots[k].visible = on; }
+  }
+  const obs = world.getObjectByName("obstacles"); if (obs) obs.visible = document.getElementById("showObs").checked;
+  if (state.plane) state.plane.visible = document.getElementById("showPlane").checked;
+}
+
+/* ---------- 5. Loading the notebook's JSON ---------- */
+function validate(obj) {
+  if (!obj || !Array.isArray(obj.centroids) || obj.centroids.length === 0)
+    throw new Error("The file has no \"centroids\" list. Export it with the sim_data cell from the notebook.");
+  for (const c of obj.centroids)
+    if (!Array.isArray(c) || c.length < 3 || c.slice(0, 3).some(v => typeof v !== "number"))
+      throw new Error("Each centroid must look like [slice, x, y, area].");
+  const maxSlice = Math.max(...obj.centroids.map(c => c[0]));
+  return {
+    patient: String(obj.patient || "Loaded patient"),
+    n_slices: Number(obj.n_slices) || maxSlice + 5,
+    img_size: Number(obj.img_size) || 256,
+    centroids: obj.centroids.slice().sort((a, b) => a[0] - b[0]),
+    metrics: obj.metrics || null
+  };
+}
+
+function loadData(d) {
+  state.data = d;
+  document.getElementById("emptyState").hidden = true;
+  document.getElementById("patientChip").textContent = d.patient;
+  document.getElementById("dataNote").textContent =
+    `Loaded ${d.centroids.length} tumor slices out of ${d.n_slices}` + (d.metrics && d.metrics.dice != null ? ` · notebook Dice ${Number(d.metrics.dice).toFixed(3)}` : "") + ".";
+  const sz = document.getElementById("sz"); sz.max = d.n_slices - 1;
+  if (+sz.value > d.n_slices - 1) sz.value = 0;
+  syncOutputs(); state.playing = false; setPlayLabel(); state.needsFrame = true; run();
+}
+
+function onFile(e) { readFile(e.target.files[0]); e.target.value = ""; }
+function readFile(f) {
+  if (!f) return;
+  const err = document.getElementById("dataErr"); err.hidden = true;
+  const r = new FileReader();
+  r.onload = () => {
+    try { loadData(validate(JSON.parse(r.result))); }
+    catch (ex) { err.textContent = ex.message.startsWith("Unexpected") ? "That file is not valid JSON." : ex.message; err.hidden = false; }
+  };
+  r.readAsText(f);
+}
+// drag a JSON file onto the 3D view
+const dropMsg = document.getElementById("dropMsg");
+vp.addEventListener("dragover", e => { e.preventDefault(); vp.classList.add("drag"); dropMsg.hidden = false; });
+vp.addEventListener("dragleave", e => { if (!vp.contains(e.relatedTarget)) { vp.classList.remove("drag"); dropMsg.hidden = true; } });
+vp.addEventListener("drop", e => { e.preventDefault(); vp.classList.remove("drag"); dropMsg.hidden = true; readFile(e.dataTransfer.files[0]); });
+document.getElementById("fileInput").addEventListener("change", onFile);
+document.getElementById("fileInput2").addEventListener("change", onFile);
+
+/* ---------- 6. Controls + animation loop ---------- */
+const outs = { sz: "szOut", sx: "sxOut", sy: "syOut", spd: "spdOut", rep: "repOut", zs: "zsOut" };
+function syncOutputs() { for (const id in outs) document.getElementById(outs[id]).textContent = document.getElementById(id).value; }
+for (const id of ["sz", "sx", "sy", "spd", "rep"]) document.getElementById(id).addEventListener("input", () => { syncOutputs(); run(); });
+document.getElementById("zs").addEventListener("input", () => { syncOutputs(); state.zScale = readNum("zs"); if (state.data) buildScene(); });
+for (const id of ["m-static", "m-dynamic", "m-avoid", "showObs", "showPlane"]) document.getElementById(id).addEventListener("change", () => { applyVisibility(); renderPlayhead(); });
+
+const playBtn = document.getElementById("playBtn");
+function setPlayLabel() { playBtn.textContent = state.playing ? "Pause" : "Play"; }
+playBtn.addEventListener("click", () => {
+  if (!state.data) return;
+  if (!state.playing && state.playhead >= state.maxLen - 1) state.playhead = 0;
+  state.playing = !state.playing; setPlayLabel();
+});
+document.getElementById("resetBtn").addEventListener("click", () => {
+  if (!state.data) return; state.playhead = 0; state.playing = true; setPlayLabel(); });
+document.getElementById("scrub").addEventListener("input", e => { state.playing = false; setPlayLabel(); state.playhead = +e.target.value; renderPlayhead(); });
+
+function resize() {
+  const w = vp.clientWidth, h = vp.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(vp);
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (state.playing) {
+    state.playhead += dt * readNum("rate");
+    if (state.playhead >= state.maxLen - 1) { state.playhead = state.maxLen - 1; state.playing = false; setPlayLabel(); }
+    renderPlayhead();
+  }
+  controls.update(); renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+
+syncOutputs(); resize(); run(); requestAnimationFrame(loop);
+window.__sim = { simulateStatic, simulateDynamic, pathLength, state };
+})();
+</script>

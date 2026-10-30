@@ -1,0 +1,802 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>NanoBot Tumor Treatment Sim</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: engine-style workspace. A 3D tissue viewport with HUD overlays on the left, an inspector/statistics column on the right; stacks on phones. Deliberately dark (lab console look). */
+:root {
+  color-scheme: dark;
+  --bg: #090c11;
+  --panel: rgba(13, 18, 25, 0.86);
+  --panel-solid: #10161e;
+  --line: #233040;
+  --fg: #e4ebf2;
+  --muted: #8e9bab;
+  --cancer: #e8495f;
+  --healthy: #8173f0;
+  --bot: #22a3c4;
+  --drug: #41a64c;
+  --accent: #5fd0ee;
+  --warn: #e7a33a;
+  --font-display: "Chakra Petch", "Arial Narrow", sans-serif;
+  --font-body: "Barlow", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.4; }
+.app {
+  height: 100%; box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px;
+  padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-block: 10px 12px;
+}
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; letter-spacing: 0.04em; text-transform: uppercase; margin: 0; }
+.brand span { color: var(--accent); }
+.chip { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.chip.live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--drug); margin-right: 6px; vertical-align: 0; }
+.chip.paused::before { background: var(--warn); }
+.spacer { flex: 1; }
+.btn, .filebtn {
+  font: 600 0.8rem var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg);
+  background: #172130; border: 1px solid var(--line); border-radius: 4px; padding: 7px 12px; cursor: pointer; position: relative;
+}
+.btn:hover, .filebtn:hover { border-color: #3a4c63; }
+.btn.on { background: var(--accent); color: #061820; border-color: var(--accent); }
+.btn.primary { background: var(--drug); border-color: var(--drug); color: #06170a; min-width: 82px; }
+.btn:focus-visible, .filebtn:focus-within, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filebtn input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.filebtn.load { background: var(--accent); border-color: var(--accent); color: #061820; }
+.filebtn.load:hover { filter: brightness(1.1); }
+.dropzone { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; background: rgba(9, 12, 17, 0.72); border: 2px dashed var(--accent); border-radius: 6px; font: 600 1.05rem var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg); pointer-events: none; z-index: 5; }
+.dropzone small { font: 400 0.82rem var(--font-body); letter-spacing: 0; text-transform: none; color: var(--muted); }
+.toast { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); background: var(--panel-solid); border: 1px solid var(--line); border-left: 3px solid var(--drug); border-radius: 4px; padding: 8px 12px; font-size: 0.82rem; max-width: calc(100% - 32px); z-index: 4; }
+.toast.bad { border-left-color: var(--cancer); }
+select { font: 500 0.8rem var(--font-body); background: #172130; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 10px; min-height: 0; }
+.viewport { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #1a0508; min-height: 380px; }
+.viewport canvas { display: block; width: 100%; height: 100%; }
+.hud { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); user-select: none; -webkit-user-select: none; }
+.hud h2, .side h2 { font-family: var(--font-display); font-weight: 600; font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 8px; }
+.hud-status { left: 12px; top: 12px; width: 218px; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 0.82rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; text-align: right; font-variant-numeric: tabular-nums; }
+.legend { display: grid; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 0.8rem; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; background: var(--c); }
+.hud-drug { left: 12px; bottom: 12px; width: 240px; }
+.hud-effect { right: 12px; bottom: 12px; width: 250px; }
+.bar { height: 8px; background: #1c2734; border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.bar i { display: block; height: 100%; width: 0%; background: var(--c); border-radius: 4px; transition: width 0.3s linear; }
+.metric { display: flex; justify-content: space-between; font-size: 0.82rem; }
+.metric b { font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+.effect-row + .effect-row { margin-top: 9px; }
+.hud-view { left: 50%; transform: translateX(-50%); bottom: 12px; padding: 6px; display: flex; gap: 6px; }
+.hud-clock { right: 12px; top: 12px; font-family: var(--font-mono); font-size: 0.8rem; display: grid; gap: 2px; text-align: right; }
+.hud-clock b { color: var(--fg); font-weight: 500; }
+.hint { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font-size: 0.74rem; color: #d7b9bd; pointer-events: none; text-shadow: 0 1px 2px #000; white-space: nowrap; }
+
+.side { background: var(--panel-solid); border: 1px solid var(--line); border-radius: 6px; overflow-y: auto; min-height: 0; }
+.side section { padding: 12px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.side section:last-child { border-bottom: 0; }
+.side h2 { margin: 0; }
+.insp-head { display: flex; align-items: center; gap: 8px; }
+.insp-head strong { font-family: var(--font-mono); font-weight: 500; }
+.state { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 10px; background: #1c2734; color: var(--fg); margin-left: auto; white-space: nowrap; }
+.state[data-s="Delivering drug"] { background: color-mix(in srgb, var(--drug) 30%, transparent); }
+.state[data-s="Navigating"], .state[data-s="Searching"] { background: color-mix(in srgb, var(--bot) 30%, transparent); }
+.state[data-s="Returning to refill"], .state[data-s="Refilling"] { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.state[data-s="Battery depleted"] { background: color-mix(in srgb, var(--cancer) 30%, transparent); }
+.ctl { display: grid; grid-template-columns: 104px minmax(0, 1fr) 44px; align-items: center; gap: 8px; font-size: 0.82rem; }
+.ctl label { color: var(--muted); }
+.ctl output { font-family: var(--font-mono); font-size: 0.78rem; text-align: right; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 0.84rem; cursor: pointer; }
+.check input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.note { font-size: 0.76rem; color: var(--muted); margin: 0; }
+.note code { font-family: var(--font-mono); font-size: 0.72rem; color: var(--fg); }
+.err { font-size: 0.78rem; color: var(--cancer); margin: 0; }
+svg text { font-family: var(--font-mono); }
+.donut-wrap { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; align-items: center; }
+.dl { display: grid; gap: 5px; font-size: 0.8rem; }
+.dl span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; background: var(--c); }
+.dl b { font-family: var(--font-mono); font-weight: 500; float: right; }
+
+@media (max-width: 900px) {
+  html, body { height: auto; }
+  .app { height: auto; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .viewport { height: 64vh; min-height: 360px; }
+  .side { overflow: visible; }
+  .hud-drug, .hud-effect, .hint { display: none; }
+  .hud-status { width: 176px; padding: 9px 10px; }
+  .hud-status .legend { display: none; }
+  .hud-clock { padding: 8px 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+<div class="app">
+  <div class="topbar">
+    <h1 class="brand">NanoBot <span>Tumor</span> Treatment Sim</h1>
+    <span class="chip live" id="runChip">Simulation running</span>
+    <span class="chip" id="tumorChip">Procedural tumor</span>
+    <div class="spacer"></div>
+    <label class="filebtn load" title="Load a sim_data_<patient>.json file exported from the notebook">Load patient JSON<input type="file" id="fileTop" accept=".json,application/json"></label>
+    <button class="btn primary" id="playBtn" type="button">Pause</button>
+    <button class="btn" id="resetBtn" type="button">Restart</button>
+    <select id="speed" aria-label="Simulation speed">
+      <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+    </select>
+  </div>
+
+  <div class="main">
+    <div class="viewport" id="viewport">
+      <div class="hud hud-status">
+        <h2>Simulation status</h2>
+        <dl class="kv">
+          <dt>Nanobots deployed</dt><dd id="sDeployed">0</dd>
+          <dt>Active nanobots</dt><dd id="sActive">0</dd>
+          <dt>Cancer cells</dt><dd id="sCancer">0</dd>
+          <dt>Healthy cells</dt><dd id="sHealthy">0</dd>
+          <dt>Drug delivered</dt><dd id="sDrug">0%</dd>
+          <dt>Treatment time</dt><dd id="sTime">00:00</dd>
+        </dl>
+        <div class="legend">
+          <span style="--c: var(--cancer)">Cancer cell</span>
+          <span style="--c: var(--healthy)">Healthy cell</span>
+          <span style="--c: var(--bot)">Nanobot</span>
+          <span style="--c: var(--drug)">Drug released</span>
+        </div>
+      </div>
+      <div class="hud hud-clock"><div>TIME <b id="cTime">00:00</b></div><div>ACTIVE <b id="cActive">0</b></div></div>
+      <div class="hint">Drag to orbit · scroll to zoom · click a nanobot · drop a patient JSON here</div>
+      <div class="toast" id="toast" role="status" hidden></div>
+      <div class="dropzone" id="dropzone" hidden>Drop patient JSON<small>A sim_data_&lt;patient&gt;.json file from the notebook</small></div>
+      <div class="hud hud-drug">
+        <h2>Drug delivery</h2>
+        <div class="metric"><span>Progress</span><b id="dProg">0%</b></div>
+        <div class="bar" style="--c: var(--drug)"><i id="dBar"></i></div>
+      </div>
+      <div class="hud hud-effect">
+        <h2>Treatment effectiveness</h2>
+        <div class="effect-row"><div class="metric"><span>Cancer cells destroyed</span><b id="eKill">0%</b></div><div class="bar" style="--c: var(--drug)"><i id="eKillBar"></i></div></div>
+        <div class="effect-row"><div class="metric"><span>Healthy cells affected</span><b id="eHarm">0%</b></div><div class="bar" style="--c: var(--cancer)"><i id="eHarmBar"></i></div></div>
+      </div>
+      <div class="hud hud-view">
+        <button class="btn" id="view2d" type="button">2D</button>
+        <button class="btn on" id="view3d" type="button">3D</button>
+        <button class="btn" id="viewReset" type="button">Reset camera</button>
+      </div>
+    </div>
+
+    <aside class="side">
+      <section>
+        <div class="insp-head"><h2>Inspector</h2><strong id="iName">Nanobot_2</strong><span class="state" id="iState" data-s="Searching">Searching</span></div>
+        <dl class="kv">
+          <dt>Position (x, y, z)</dt><dd id="iPos">0, 0, 0</dd>
+          <dt>Speed</dt><dd id="iSpeed">0</dd>
+          <dt>Detection radius</dt><dd id="iRadius">0</dd>
+          <dt>Drug remaining</dt><dd id="iDrug">0 / 100</dd>
+          <dt>Drug per release</dt><dd id="iRelease">20</dd>
+          <dt>Battery</dt><dd id="iBattery">100%</dd>
+          <dt>Target</dt><dd id="iTarget">None</dd>
+        </dl>
+        <div class="row"><button class="btn" id="followBtn" type="button">Follow</button><button class="btn" id="nextBot" type="button">Next nanobot</button></div>
+      </section>
+
+      <section>
+        <h2>Cancer cells remaining</h2>
+        <svg id="lineChart" viewBox="0 0 300 120" role="img" aria-label="Cancer cells remaining over treatment time" style="width:100%;height:auto;display:block"></svg>
+      </section>
+
+      <section>
+        <h2>Tumor outcome</h2>
+        <div class="donut-wrap">
+          <svg id="donut" viewBox="0 0 112 112" role="img" aria-label="Share of cancer cells destroyed, under treatment and remaining" style="width:112px;height:112px"></svg>
+          <div class="dl">
+            <span style="--c: var(--drug)">Destroyed <b id="oKill">0</b></span>
+            <span style="--c: var(--warn)">Under treatment <b id="oTreat">0</b></span>
+            <span style="--c: var(--cancer)">Remaining <b id="oLeft">0</b></span>
+            <span style="--c: var(--healthy)">Healthy affected <b id="oHarm">0</b></span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Mission setup</h2>
+        <div class="ctl"><label for="nBots">Nanobots</label><input type="range" id="nBots" min="10" max="80" step="5" value="50"><output id="nBotsOut">50</output></div>
+        <div class="ctl"><label for="tSize">Tumor cells</label><input type="range" id="tSize" min="40" max="260" step="10" value="140"><output id="tSizeOut">140</output></div>
+        <div class="ctl"><label for="detect">Detection radius</label><input type="range" id="detect" min="6" max="40" step="1" value="18"><output id="detectOut">18</output></div>
+        <div class="ctl"><label for="targeting">Targeting</label>
+          <select id="targeting" style="grid-column: span 2">
+            <option value="nearest" selected>Nearest cancer cell (dynamic)</option>
+            <option value="center">Tumor centre first (static)</option>
+          </select></div>
+        <label class="check"><input type="checkbox" id="avoid" checked>Steer around healthy cells</label>
+        <p class="note">Setup changes apply when you press Restart.</p>
+      </section>
+
+      <section>
+        <h2>Patient tumor</h2>
+        <div class="row">
+          <label class="filebtn">Load sim_data JSON<input type="file" id="fileIn" accept=".json,application/json"></label>
+          <button class="btn" id="procBtn" type="button">Procedural</button>
+        </div>
+        <p class="note" id="tumorNote">Using a procedural tumor. Load a <code>sim_data_&lt;patient&gt;.json</code> file to shape the tumor from your U-Net centroids, one cluster per MRI slice.</p>
+        <p class="err" id="fileErr" hidden></p>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const vp = $("viewport");
+if (typeof THREE === "undefined") { vp.insertAdjacentHTML("beforeend", '<p class="err" style="padding:16px">The 3D library did not load. Check your connection and reload.</p>'); return; }
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------- seeded random so each restart is reproducible ---------- */
+let seed = 7;
+const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+const rr = (a, b) => a + (b - a) * rand();
+
+/* ---------- renderer, scene, camera ---------- */
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); }
+catch (e) { vp.insertAdjacentHTML("beforeend", '<p class="err" style="padding:16px">WebGL is not available in this browser, so the 3D scene cannot be drawn.</p>'); return; }
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+vp.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x24060b);
+scene.fog = new THREE.FogExp2(0x2a070c, 0.0105);
+const camera = new THREE.PerspectiveCamera(48, 1, 0.5, 900);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.maxDistance = 220; controls.minDistance = 12;
+controls.maxPolarAngle = Math.PI * 0.49;
+const HOME = { pos: new THREE.Vector3(34, 24, 44), target: new THREE.Vector3(0, 3, 0) };
+camera.position.copy(HOME.pos); controls.target.copy(HOME.target);
+
+scene.add(new THREE.HemisphereLight(0xffd6d6, 0x3a0a10, 0.75));
+const key = new THREE.DirectionalLight(0xfff0ea, 0.9); key.position.set(40, 80, 30); scene.add(key);
+const rim = new THREE.PointLight(0x5fd0ee, 0.6, 160); rim.position.set(-50, 30, -40); scene.add(rim);
+const warm = new THREE.PointLight(0xff4a5c, 0.8, 140); warm.position.set(30, 18, 30); scene.add(warm);
+
+let composer = null, bloom = null;
+try {
+  composer = new THREE.EffectComposer(renderer);
+  composer.addPass(new THREE.RenderPass(scene, camera));
+  bloom = new THREE.UnrealBloomPass(new THREE.Vector2(512, 512), 0.75, 0.55, 0.62);
+  composer.addPass(bloom);
+} catch (e) { composer = null; }
+
+/* ---------- shared textures & geometries ---------- */
+function glowTexture(rgb) {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d"), grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, `rgba(${rgb},1)`); grd.addColorStop(0.35, `rgba(${rgb},0.55)`); grd.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+const TEX = { blue: glowTexture("90,190,255"), green: glowTexture("120,255,120"), cyan: glowTexture("120,230,255"), pink: glowTexture("255,120,140") };
+
+// lumpy "raspberry" cell: an icosphere pushed out by many small bumps
+function lumpyGeometry(bumps, height, sharp, detail) {
+  const g = new THREE.SphereGeometry(1, detail * 14, detail * 10);
+  const pos = g.attributes.position, v = new THREE.Vector3();
+  const centers = [];
+  for (let i = 0; i < bumps; i++) centers.push(new THREE.Vector3(rr(-1, 1), rr(-1, 1), rr(-1, 1)).normalize());
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    let d = 0;
+    for (const c of centers) { const dd = v.distanceToSquared(c); d += Math.exp(-dd * sharp); }
+    v.multiplyScalar(1 + height * Math.min(d, 1.6));
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const CANCER_GEOS = [], HEALTHY_GEOS = [];
+
+/* ---------- static environment: tissue floor, vessels, blood cells, specks ---------- */
+const env = new THREE.Group(); scene.add(env);
+const vesselCurves = [];
+function buildEnvironment() {
+  // tissue floor
+  const fg = new THREE.PlaneGeometry(320, 320, 140, 140); fg.rotateX(-Math.PI / 2);
+  const p = fg.attributes.position, colors = [];
+  const cA = new THREE.Color(0x5a0f17), cB = new THREE.Color(0x2c0509);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    const h = Math.sin(x * 0.11) * Math.cos(z * 0.09) * 2.2 + Math.sin(x * 0.31 + z * 0.23) * 0.9 + Math.sin(z * 0.6) * Math.cos(x * 0.5) * 0.4;
+    p.setY(i, h - 14);
+    const t = Math.min(1, Math.max(0, (h + 3) / 6)); const c = cB.clone().lerp(cA, t); colors.push(c.r, c.g, c.b);
+  }
+  fg.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3)); fg.computeVertexNormals();
+  env.add(new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })));
+
+  // blood vessels
+  const vMat = new THREE.MeshStandardMaterial({ color: 0x9a1424, emissive: 0x3a0308, roughness: 0.45, metalness: 0.05 });
+  const vDark = new THREE.MeshStandardMaterial({ color: 0x6a0b17, emissive: 0x220205, roughness: 0.6 });
+  seed = 31;
+  for (let k = 0; k < 11; k++) {
+    const pts = []; const y0 = rr(-12, 18), ang = rr(0, Math.PI), len = rr(150, 240);
+    const dx = Math.cos(ang), dz = Math.sin(ang), ox = rr(-50, 50), oz = rr(-50, 50);
+    for (let s = 0; s <= 6; s++) {
+      const t = s / 6 - 0.5;
+      pts.push(new THREE.Vector3(ox + dx * t * len + rr(-12, 12), y0 + rr(-5, 5) + Math.sin(t * 4) * 4, oz + dz * t * len + rr(-12, 12)));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const r = k < 3 ? rr(2.4, 3.4) : rr(0.6, 1.6);
+    env.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 120, r, 12, false), k % 3 === 2 ? vDark : vMat));
+    if (k < 5) vesselCurves.push({ curve, r });
+  }
+  // red blood cells flowing through the large vessels
+  const rbcGeo = new THREE.SphereGeometry(0.55, 10, 8); rbcGeo.scale(1, 0.38, 1);
+  const rbc = new THREE.InstancedMesh(rbcGeo, new THREE.MeshStandardMaterial({ color: 0xd92a3a, emissive: 0x4a0510, roughness: 0.4 }), 360);
+  rbc.userData.items = [];
+  for (let i = 0; i < 360; i++) rbc.userData.items.push({ c: i % vesselCurves.length, t: rand(), off: new THREE.Vector3(rr(-1, 1), rr(-1, 1), rr(-1, 1)), sp: rr(0.012, 0.03), rot: rr(0, 6) });
+  env.add(rbc); env.userData.rbc = rbc;
+  // floating plasma specks
+  const n = 1400, sp = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { sp[i * 3] = rr(-140, 140); sp[i * 3 + 1] = rr(-12, 60); sp[i * 3 + 2] = rr(-140, 140); }
+  const sg = new THREE.BufferGeometry(); sg.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+  const specks = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xff9aa8, size: 0.35, transparent: true, opacity: 0.55, depthWrite: false }));
+  env.add(specks); env.userData.specks = specks;
+}
+
+/* ---------- nanobot model ---------- */
+const botParts = {
+  body: new THREE.SphereGeometry(1, 28, 20),
+  band: new THREE.TorusGeometry(1.02, 0.07, 8, 40),
+  port: new THREE.CircleGeometry(0.17, 16),
+  eye: new THREE.SphereGeometry(0.24, 14, 10),
+  leg: new THREE.CylinderGeometry(0.11, 0.16, 0.9, 8),
+  jet: new THREE.ConeGeometry(0.2, 0.42, 10, 1, true),
+  nozzle: new THREE.ConeGeometry(0.16, 0.5, 10),
+};
+const botMats = {
+  shell: new THREE.MeshStandardMaterial({ color: 0xeef2f5, roughness: 0.28, metalness: 0.35 }),
+  band: new THREE.MeshStandardMaterial({ color: 0x8b98a6, roughness: 0.4, metalness: 0.6 }),
+  port: new THREE.MeshBasicMaterial({ color: 0x1a222c, side: THREE.DoubleSide }),
+  eye: new THREE.MeshBasicMaterial({ color: 0x8fe8ff }),
+  jet: new THREE.MeshBasicMaterial({ color: 0x5ab8ff, side: THREE.DoubleSide }),
+  dead: new THREE.MeshStandardMaterial({ color: 0x5a6068, roughness: 0.7, metalness: 0.2 }),
+};
+function makeBot() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(botParts.body, botMats.shell); g.add(body);
+  const band = new THREE.Mesh(botParts.band, botMats.band); band.rotation.x = Math.PI / 2; g.add(band);
+  // dark sensor ports around the shell
+  for (let i = 0; i < 8; i++) {
+    const th = (i / 8) * Math.PI * 2, ph = i % 2 ? 0.45 : -0.2;
+    const n = new THREE.Vector3(Math.cos(th) * Math.cos(ph), Math.sin(ph), Math.sin(th) * Math.cos(ph));
+    const port = new THREE.Mesh(botParts.port, botMats.port);
+    port.position.copy(n.clone().multiplyScalar(1.005)); port.lookAt(n.clone().multiplyScalar(2)); g.add(port);
+  }
+  const eye = new THREE.Mesh(botParts.eye, botMats.eye); eye.position.set(0, 0.15, 0.95); g.add(eye);
+  const nozzle = new THREE.Mesh(botParts.nozzle, botMats.band); nozzle.rotation.x = Math.PI / 2; nozzle.position.set(0, -0.25, 1.05); g.add(nozzle);
+  // three thruster legs with blue glow
+  const jets = [];
+  for (let i = 0; i < 3; i++) {
+    const th = (i / 3) * Math.PI * 2 + Math.PI / 6;
+    const leg = new THREE.Mesh(botParts.leg, botMats.band);
+    leg.position.set(Math.cos(th) * 0.75, -0.85, Math.sin(th) * 0.75 - 0.2); leg.rotation.z = Math.cos(th) * 0.5; leg.rotation.x = -Math.sin(th) * 0.5;
+    g.add(leg);
+    const jet = new THREE.Mesh(botParts.jet, botMats.jet); jet.position.set(leg.position.x * 1.25, -1.35, leg.position.z * 1.15); jet.rotation.x = Math.PI; g.add(jet);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.blue, color: 0x8fd0ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.position.set(jet.position.x, -1.7, jet.position.z); glow.scale.set(1.4, 1.4, 1); g.add(glow); jets.push(glow);
+  }
+  g.scale.setScalar(2.1);
+  g.userData = { body, jets, eye };
+  return g;
+}
+
+/* ---------- simulation state ---------- */
+const world = new THREE.Group(); scene.add(world);
+let cells = [], healthy = [], bots = [], series = [];
+let simTime = 0, playing = true, totalDrug = 0, drugNeeded = 1, deployed = 0;
+let selected = 2, follow = false, tumorData = null, tumorCenter = new THREE.Vector3();
+const INJECT = new THREE.Vector3(-62, 12, -44);
+const params = () => ({ nBots: +$("nBots").value, nCells: +$("tSize").value, detect: +$("detect").value, mode: $("targeting").value, avoid: $("avoid").checked });
+let P = params();
+
+const selRing = new THREE.Mesh(new THREE.TorusGeometry(3.8, 0.1, 8, 48), new THREE.MeshBasicMaterial({ color: 0x8fe8ff }));
+selRing.rotation.x = Math.PI / 2; scene.add(selRing);
+const injector = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.cyan, color: 0x9fe8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+injector.position.copy(INJECT); injector.scale.set(9, 9, 1); scene.add(injector);
+
+function placeCells() {
+  const list = [];
+  if (tumorData) {
+    // one cluster per segmented MRI slice: x/y from the centroid, slice index stacked vertically
+    const d = tumorData, zc = (d.n_slices - 1) / 2, h = d.img_size / 2;
+    for (const c of d.centroids) {
+      const center = new THREE.Vector3((c[1] - h) * 0.32, 2 + (c[0] - zc) * 0.9, (c[2] - h) * 0.32);
+      const spread = Math.max(2.5, Math.sqrt((c[3] || 200) / Math.PI) * 0.32);
+      const k = Math.max(2, Math.min(16, Math.round(Math.sqrt(c[3] || 200) / 3)));
+      for (let i = 0; i < k; i++) list.push({ p: center.clone().add(new THREE.Vector3(rr(-1, 1), rr(-0.6, 0.6), rr(-1, 1)).multiplyScalar(spread)), r: rr(1.5, 2.8) });
+    }
+  } else {
+    // procedural tumor: three overlapping lobes
+    const lobes = [[0, 3, 0, 15], [10, 1, -8, 10], [-9, 5, 7, 9]];
+    let tries = 0;
+    while (list.length < P.nCells && tries++ < P.nCells * 60) {
+      const L = lobes[Math.floor(rand() * lobes.length)];
+      const dir = new THREE.Vector3(rr(-1, 1), rr(-0.55, 0.7), rr(-1, 1));
+      if (dir.lengthSq() > 1) continue;
+      const pt = new THREE.Vector3(L[0], L[1], L[2]).add(dir.multiplyScalar(L[3]));
+      const r = rr(1.6, 3.1);
+      if (list.every(o => o.p.distanceTo(pt) > (o.r + r) * 0.72)) list.push({ p: pt, r });
+    }
+  }
+  return list;
+}
+
+function reset() {
+  P = params(); seed = 7;
+  world.clear();
+  if (!CANCER_GEOS.length) {
+    for (let i = 0; i < 6; i++) CANCER_GEOS.push(lumpyGeometry(46, 0.16, 26, 3));
+    for (let i = 0; i < 3; i++) HEALTHY_GEOS.push(lumpyGeometry(10, 0.05, 6, 3));
+  }
+  cells = []; healthy = []; bots = []; series = []; simTime = 0; totalDrug = 0; deployed = 0;
+  // cancer cells
+  const spots = placeCells();
+  tumorCenter.set(0, 0, 0);
+  for (const s of spots) {
+    const health = 70 + 70 * (s.r / 3);
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.965 + rr(-0.015, 0.015), 0.72, rr(0.56, 0.66)), roughness: 0.55, emissive: 0x3a0610, emissiveIntensity: 1 });
+    const m = new THREE.Mesh(CANCER_GEOS[Math.floor(rand() * CANCER_GEOS.length)], mat);
+    m.position.copy(s.p); m.scale.setScalar(s.r); m.rotation.set(rr(0, 6), rr(0, 6), rr(0, 6));
+    world.add(m);
+    cells.push({ mesh: m, mat, p: s.p.clone(), r: s.r, health, max: health, claims: 0, dead: false, dying: 0, treated: 0 });
+    tumorCenter.add(s.p);
+  }
+  tumorCenter.divideScalar(Math.max(1, cells.length));
+  drugNeeded = cells.reduce((a, c) => a + c.max, 0);
+  // healthy cells in a ring around the tumor
+  let tries = 0;
+  while (healthy.length < 55 && tries++ < 5000) {
+    const a = rr(0, Math.PI * 2), d = rr(18, 62), pt = new THREE.Vector3(tumorCenter.x + Math.cos(a) * d, rr(-9, 14), tumorCenter.z + Math.sin(a) * d);
+    const r = rr(1.8, 3.0);
+    if (cells.some(c => c.p.distanceTo(pt) < c.r + r + 1.5)) continue;
+    if (healthy.some(h => h.p.distanceTo(pt) < h.r + r + 0.6)) continue;
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.72 + rr(-0.03, 0.03), 0.55, rr(0.42, 0.52)), roughness: 0.4, emissive: 0x140a30 });
+    const m = new THREE.Mesh(HEALTHY_GEOS[Math.floor(rand() * 3)], mat);
+    m.position.copy(pt); m.scale.setScalar(r); world.add(m);
+    healthy.push({ mesh: m, mat, p: pt, r, affected: false });
+  }
+  // nanobots, released from the injection point one after another
+  for (let i = 0; i < P.nBots; i++) {
+    const g = makeBot(); g.visible = false; g.position.copy(INJECT); world.add(g);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1, 6, 1, true), new THREE.MeshBasicMaterial({ color: 0x7dff7d, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
+    beam.visible = false; world.add(beam);
+    const splash = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.green, color: 0x9dff8f, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    splash.visible = false; splash.scale.set(5, 5, 1); world.add(splash);
+    bots.push({
+      id: i, g, beam, splash, pos: INJECT.clone(), vel: new THREE.Vector3(), released: false, releaseAt: i * 0.35,
+      speed: rr(5.2, 6.8), drug: 100, battery: 100, state: "Searching", target: null, releaseT: 0, phase: rr(0, 6), wander: new THREE.Vector3(rr(-1, 1), 0, rr(-1, 1)).normalize(), staged: false,
+    });
+  }
+  selected = Math.min(2, bots.length - 1);
+}
+
+/* ---------- agent logic ---------- */
+const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+function pickTarget(b) {
+  const from = (P.mode === "center" && !b.staged) ? null : b.pos;
+  if (!from) return null; // static mode: fly to the tumor centre first
+  let best = null, bestD = Infinity, bestLocal = null, bestLocalD = Infinity;
+  for (const c of cells) {
+    if (c.dead || c.dying || c.claims >= 1) continue;
+    const d = c.p.distanceTo(from) - c.r;
+    if (d < bestD) { bestD = d; best = c; }
+    if (d < P.detect && d < bestLocalD) { bestLocalD = d; bestLocal = c; }
+  }
+  return bestLocal || (P.mode === "nearest" ? best : best);
+}
+function setTarget(b, c) { if (b.target) b.target.claims--; b.target = c; if (c) c.claims++; }
+
+function steer(b, goal, dt, arriveDist) {
+  tmp.copy(goal).sub(b.pos); const dist = tmp.length();
+  const desired = tmp.normalize().multiplyScalar(b.speed * Math.min(1, dist / (arriveDist * 2 + 0.01)));
+  // separation from other bots
+  for (const o of bots) {
+    if (o === b || !o.released) continue;
+    tmp2.copy(b.pos).sub(o.pos); const d = tmp2.length();
+    if (d > 0 && d < 6) desired.add(tmp2.multiplyScalar((6 - d) * 0.8 / d));
+  }
+  // obstacle-aware: repel from healthy cells and the floor
+  if (P.avoid) for (const h of healthy) {
+    tmp2.copy(b.pos).sub(h.p); const d = tmp2.length() - h.r;
+    if (d < 6) desired.add(tmp2.normalize().multiplyScalar((6 - Math.max(d, 0.2)) * 2.2));
+  }
+  if (b.pos.y < -8) desired.y += (-8 - b.pos.y) * 2;
+  b.vel.lerp(desired, Math.min(1, dt * 2.5));
+  b.pos.addScaledVector(b.vel, dt);
+  // collateral: passing through a healthy cell damages it
+  for (const h of healthy) if (!h.affected && b.pos.distanceTo(h.p) < h.r * 0.9) affect(h);
+  return dist;
+}
+function affect(h) { h.affected = true; h.mat.color.set(0x5d5670); h.mat.emissive.set(0x000000); }
+
+function updateBot(b, dt) {
+  if (!b.released) { if (simTime >= b.releaseAt) { b.released = true; b.g.visible = true; deployed++; } else return; }
+  if (b.state === "Battery depleted") { b.vel.multiplyScalar(0.96); b.vel.y -= dt * 0.8; b.pos.addScaledVector(b.vel, dt); if (b.pos.y < -11) b.pos.y = -11; return; }
+  b.battery = Math.max(0, b.battery - dt * (b.state === "Delivering drug" ? 0.22 : 0.32));
+  if (b.battery <= 0) { b.state = "Battery depleted"; setTarget(b, null); b.g.userData.body.material = botMats.dead; b.g.userData.jets.forEach(j => j.visible = false); b.beam.visible = b.splash.visible = false; return; }
+
+  if (b.state === "Returning to refill") {
+    if (steer(b, INJECT, dt, 2) < 3) { b.state = "Refilling"; b.releaseT = 0; }
+    return;
+  }
+  if (b.state === "Refilling") {
+    b.vel.multiplyScalar(0.9); b.releaseT += dt; b.drug = Math.min(100, b.drug + dt * 45); b.battery = Math.min(100, b.battery + dt * 25);
+    if (b.drug >= 100 && b.battery >= 95) { b.state = "Searching"; b.staged = false; }
+    return;
+  }
+  if (b.drug <= 0) { setTarget(b, null); b.state = "Returning to refill"; b.beam.visible = b.splash.visible = false; return; }
+
+  if (!b.target || b.target.dead || b.target.dying) {
+    setTarget(b, null);
+    if (P.mode === "center" && !b.staged) {
+      b.state = "Navigating";
+      if (steer(b, tumorCenter, dt, 4) < 10) b.staged = true;
+      return;
+    }
+    const c = pickTarget(b);
+    if (c) { setTarget(b, c); b.state = "Navigating"; }
+    else { // nothing left: patrol slowly
+      b.state = "Searching"; tmp.copy(tumorCenter).addScaledVector(b.wander, 24); tmp.y = 10 + Math.sin(simTime * 0.3 + b.phase) * 4; steer(b, tmp, dt, 4);
+      b.beam.visible = b.splash.visible = false; return;
+    }
+  }
+  const c = b.target;
+  const standOff = c.r + 4.2;
+  tmp.copy(b.pos).sub(c.p); if (tmp.lengthSq() < 1e-6) tmp.set(0, 1, 0);
+  const goal = c.p.clone().add(tmp.normalize().multiplyScalar(standOff));
+  const d = steer(b, goal, dt, 1.2);
+  if (d < 1.6) {
+    b.state = "Delivering drug";
+    b.releaseT += dt;
+    if (b.releaseT >= 1.1) {
+      b.releaseT = 0;
+      const dose = Math.min(20, b.drug, c.health);
+      c.health -= dose; b.drug -= dose; totalDrug += dose; c.treated = 1;
+      if (!P.avoid) for (const h of healthy) if (!h.affected && h.p.distanceTo(c.p) < h.r + c.r + 2.5 && rand() < 0.18) affect(h);
+      if (c.health <= 0.01) { c.dying = 0.0001; setTarget(b, null); }
+    }
+  } else if (b.state !== "Delivering drug" || d > 3) { b.state = "Navigating"; b.releaseT = Math.min(b.releaseT, 0.8); }
+}
+
+function drawBot(b, t) {
+  if (!b.released) return;
+  b.g.position.copy(b.pos);
+  b.g.position.y += Math.sin(t * 2.2 + b.phase) * 0.18;
+  // face the target, or the direction of travel
+  const look = b.target && !b.target.dead ? b.target.p : (b.vel.lengthSq() > 0.05 ? tmp.copy(b.pos).add(b.vel) : null);
+  if (look) { const m = new THREE.Matrix4().lookAt(look, b.g.position, new THREE.Vector3(0, 1, 0)); const q = new THREE.Quaternion().setFromRotationMatrix(m); b.g.quaternion.slerp(q, 0.12); }
+  const active = b.state !== "Battery depleted";
+  b.g.userData.jets.forEach((j, i) => { const s = active ? 1.1 + Math.sin(t * 18 + i * 2 + b.phase) * 0.25 + Math.min(1, b.vel.length() / 6) * 0.6 : 0; j.scale.set(s, s, 1); });
+  // drug beam
+  if (b.state === "Delivering drug" && b.target) {
+    const from = new THREE.Vector3(0, -0.25, 1.4).applyMatrix4(b.g.matrixWorld);
+    const to = b.target.p.clone().add(from.clone().sub(b.target.p).normalize().multiplyScalar(b.target.r * 0.9));
+    const len = from.distanceTo(to);
+    b.beam.visible = true; b.beam.position.copy(from).lerp(to, 0.5); b.beam.scale.set(1, len, 1);
+    b.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+    b.beam.material.opacity = 0.55 + Math.sin(t * 20 + b.phase) * 0.3;
+    b.splash.visible = true; b.splash.position.copy(to); const s = 4 + Math.sin(t * 9 + b.phase) * 1.2 + b.releaseT * 2.5; b.splash.scale.set(s, s, 1);
+  } else { b.beam.visible = false; b.splash.visible = false; }
+}
+
+function updateCells(dt) {
+  for (const c of cells) {
+    if (c.dead) continue;
+    if (c.dying) {
+      c.dying += dt;
+      const k = Math.max(0, 1 - c.dying / 1.6);
+      c.mesh.scale.setScalar(c.r * (0.3 + 0.7 * k));
+      c.mat.color.lerp(new THREE.Color(0x3a2a24), 0.08); c.mat.emissive.set(0x000000);
+      c.mat.transparent = true; c.mat.opacity = k;
+      if (c.dying > 1.6) { c.dead = true; c.mesh.visible = false; }
+    } else if (c.treated) {
+      const f = c.health / c.max;
+      c.mat.emissive.setRGB(0.05 + (1 - f) * 0.12, 0.08 + (1 - f) * 0.25, 0.02);
+    }
+  }
+}
+
+/* ---------- HUD & charts ---------- */
+const fmtTime = s => { const m = Math.floor(s / 60), r = Math.floor(s % 60); return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`; };
+function stats() {
+  const dead = cells.filter(c => c.dead || c.dying).length;
+  const treating = cells.filter(c => !c.dead && !c.dying && c.treated).length;
+  const harm = healthy.filter(h => h.affected).length;
+  const active = bots.filter(b => b.released && b.state !== "Battery depleted").length;
+  return { dead, treating, left: cells.length - dead, untreated: cells.length - dead - treating, harm, active };
+}
+function setBar(id, pct) { $(id).style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + "%"; }
+function updateHud() {
+  const s = stats();
+  const killPct = cells.length ? (100 * s.dead) / cells.length : 0, harmPct = healthy.length ? (100 * s.harm) / healthy.length : 0;
+  const drugPct = Math.min(100, (100 * totalDrug) / drugNeeded);
+  $("sDeployed").textContent = deployed; $("sActive").textContent = s.active; $("sCancer").textContent = s.left;
+  $("sHealthy").textContent = healthy.length - s.harm; $("sDrug").textContent = drugPct.toFixed(0) + "%"; $("sTime").textContent = fmtTime(simTime);
+  $("cTime").textContent = fmtTime(simTime); $("cActive").textContent = s.active;
+  $("dProg").textContent = drugPct.toFixed(0) + "%"; setBar("dBar", drugPct);
+  $("eKill").textContent = killPct.toFixed(0) + "%"; setBar("eKillBar", killPct);
+  $("eHarm").textContent = harmPct.toFixed(0) + "%"; setBar("eHarmBar", harmPct);
+  $("oKill").textContent = s.dead; $("oTreat").textContent = s.treating; $("oLeft").textContent = s.untreated; $("oHarm").textContent = `${s.harm} of ${healthy.length}`;
+  drawDonut(s); drawLine();
+  const b = bots[selected];
+  if (b) {
+    $("iName").textContent = "Nanobot_" + b.id;
+    const st = b.released ? b.state : "Waiting to deploy";
+    $("iState").textContent = st; $("iState").dataset.s = st;
+    $("iPos").textContent = `${b.pos.x.toFixed(1)}, ${b.pos.y.toFixed(1)}, ${b.pos.z.toFixed(1)}`;
+    $("iSpeed").textContent = b.vel.length().toFixed(1) + " u/s"; $("iRadius").textContent = P.detect + " u";
+    $("iDrug").textContent = `${Math.round(b.drug)} / 100`; $("iBattery").textContent = Math.round(b.battery) + "%";
+    $("iTarget").textContent = b.target ? `CancerCell_${cells.indexOf(b.target)}` : (b.state === "Returning to refill" || b.state === "Refilling" ? "Injection port" : "None");
+  }
+  const chip = $("runChip");
+  const done = s.left === 0 && cells.length > 0;
+  chip.textContent = done ? "Tumor cleared" : playing ? "Simulation running" : "Paused";
+  chip.classList.toggle("paused", !playing || done);
+}
+const NS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function drawDonut(s) {
+  const svg = $("donut"); svg.innerHTML = "";
+  const total = Math.max(1, cells.length), parts = [[s.dead, "var(--drug)"], [s.treating, "var(--warn)"], [s.untreated, "var(--cancer)"]];
+  const R = 46, C = 2 * Math.PI * R; let off = 0;
+  svg.appendChild(svgEl("circle", { cx: 56, cy: 56, r: R, fill: "none", stroke: "#1c2734", "stroke-width": 14 }));
+  for (const [v, col] of parts) {
+    if (!v) continue; const len = (v / total) * C;
+    svg.appendChild(svgEl("circle", { cx: 56, cy: 56, r: R, fill: "none", stroke: col, "stroke-width": 14, "stroke-dasharray": `${Math.max(0, len - 1.5)} ${C}`, "stroke-dashoffset": -off, transform: "rotate(-90 56 56)" }));
+    off += len;
+  }
+  const t = svgEl("text", { x: 56, y: 54, "text-anchor": "middle", fill: "#e4ebf2", "font-size": 18 }); t.textContent = Math.round((100 * s.dead) / total) + "%"; svg.appendChild(t);
+  const t2 = svgEl("text", { x: 56, y: 70, "text-anchor": "middle", fill: "#8e9bab", "font-size": 9 }); t2.textContent = "destroyed"; svg.appendChild(t2);
+}
+function drawLine() {
+  const svg = $("lineChart"); svg.innerHTML = "";
+  const W = 300, H = 120, L = 34, R = 10, T = 10, B = 22;
+  const maxY = Math.max(1, cells.length), maxX = Math.max(60, series.length ? series[series.length - 1][0] : 60);
+  const x = v => L + (v / maxX) * (W - L - R), y = v => T + (1 - v / maxY) * (H - T - B);
+  for (const f of [0, 0.5, 1]) {
+    const v = Math.round(maxY * f);
+    svg.appendChild(svgEl("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "#233040", "stroke-width": 1 }));
+    const lab = svgEl("text", { x: L - 6, y: y(v) + 3, "text-anchor": "end", fill: "#8e9bab", "font-size": 9 }); lab.textContent = v; svg.appendChild(lab);
+  }
+  const xl = svgEl("text", { x: W - R, y: H - 6, "text-anchor": "end", fill: "#8e9bab", "font-size": 9 }); xl.textContent = fmtTime(maxX); svg.appendChild(xl);
+  const x0 = svgEl("text", { x: L, y: H - 6, "text-anchor": "start", fill: "#8e9bab", "font-size": 9 }); x0.textContent = "00:00"; svg.appendChild(x0);
+  if (series.length < 2) return;
+  const d = series.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  svg.appendChild(svgEl("path", { d: d + `L${x(series[series.length - 1][0]).toFixed(1)},${y(0)}L${x(series[0][0]).toFixed(1)},${y(0)}Z`, fill: "rgba(232,73,95,0.14)" }));
+  svg.appendChild(svgEl("path", { d, fill: "none", stroke: "var(--cancer)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  const last = series[series.length - 1];
+  svg.appendChild(svgEl("circle", { cx: x(last[0]), cy: y(last[1]), r: 3.5, fill: "var(--cancer)", stroke: "#10161e", "stroke-width": 2 }));
+  const lv = svgEl("text", { x: Math.min(x(last[0]) + 6, W - R - 2), y: Math.max(12, y(last[1]) - 6), "text-anchor": x(last[0]) > W - 40 ? "end" : "start", fill: "#e4ebf2", "font-size": 10 }); lv.textContent = last[1]; svg.appendChild(lv);
+}
+
+/* ---------- interaction ---------- */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+renderer.domElement.addEventListener("click", e => {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  let best = -1, bestD = 3.5;
+  bots.forEach((b, i) => { if (!b.released) return; const d = ray.ray.distanceToPoint(b.g.position); if (d < bestD) { bestD = d; best = i; } });
+  if (best >= 0) { selected = best; updateHud(); }
+});
+$("nextBot").addEventListener("click", () => { selected = (selected + 1) % bots.length; updateHud(); });
+$("followBtn").addEventListener("click", () => { follow = !follow; $("followBtn").classList.toggle("on", follow); $("followBtn").textContent = follow ? "Following" : "Follow"; });
+function setView(mode) {
+  $("view2d").classList.toggle("on", mode === "2d"); $("view3d").classList.toggle("on", mode === "3d");
+  if (mode === "2d") { controls.maxPolarAngle = 0.0001; controls.minPolarAngle = 0; camera.position.set(tumorCenter.x, 150, tumorCenter.z + 0.01); controls.target.copy(tumorCenter); controls.enableRotate = false; }
+  else { controls.maxPolarAngle = Math.PI * 0.49; controls.minPolarAngle = 0; controls.enableRotate = true; camera.position.copy(HOME.pos).add(tumorCenter); controls.target.copy(HOME.target).add(tumorCenter); }
+  follow = false; $("followBtn").classList.remove("on"); $("followBtn").textContent = "Follow";
+}
+$("view2d").addEventListener("click", () => setView("2d"));
+$("view3d").addEventListener("click", () => setView("3d"));
+$("viewReset").addEventListener("click", () => setView($("view2d").classList.contains("on") ? "2d" : "3d"));
+$("playBtn").addEventListener("click", () => { playing = !playing; $("playBtn").textContent = playing ? "Pause" : "Play"; updateHud(); });
+$("resetBtn").addEventListener("click", () => { reset(); playing = true; $("playBtn").textContent = "Pause"; updateHud(); });
+for (const id of ["nBots", "tSize", "detect"]) $(id).addEventListener("input", () => { $(id + "Out").textContent = $(id).value; });
+
+let toastTimer = 0;
+function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.classList.toggle("bad", !!bad); t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, bad ? 7000 : 4000); }
+function loadFile(f) {
+  if (!f) return; const err = $("fileErr"); err.hidden = true;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const o = JSON.parse(rd.result);
+      if (!o || !Array.isArray(o.centroids) || !o.centroids.length) throw new Error("This file has no \"centroids\" list. Export it with the sim_data cell in the notebook.");
+      if (o.centroids.some(c => !Array.isArray(c) || c.length < 3 || c.slice(0, 3).some(v => typeof v !== "number"))) throw new Error("Each centroid must look like [slice, x, y, area].");
+      tumorData = { patient: String(o.patient || "Patient"), n_slices: +o.n_slices || Math.max(...o.centroids.map(c => c[0])) + 5, img_size: +o.img_size || 256, centroids: o.centroids };
+      $("tumorChip").textContent = tumorData.patient;
+      $("tumorNote").textContent = `Tumor built from ${tumorData.centroids.length} segmented MRI slices of ${tumorData.patient}, one cell cluster per slice, sized by tumor area.`;
+      reset(); setView("3d"); playing = true; $("playBtn").textContent = "Pause"; updateHud();
+      toast(`Loaded ${tumorData.patient}: ${tumorData.centroids.length} tumor slices, ${cells.length} cancer cells`);
+    } catch (ex) { err.textContent = ex instanceof SyntaxError ? "That file is not valid JSON." : ex.message; err.hidden = false; toast(err.textContent, true); }
+  };
+  rd.readAsText(f);
+}
+for (const id of ["fileIn", "fileTop"]) $(id).addEventListener("change", e => { loadFile(e.target.files[0]); e.target.value = ""; });
+// drag and drop onto the 3D view
+const dz = $("dropzone");
+vp.addEventListener("dragover", e => { e.preventDefault(); dz.hidden = false; });
+vp.addEventListener("dragleave", e => { if (!vp.contains(e.relatedTarget)) dz.hidden = true; });
+vp.addEventListener("drop", e => { e.preventDefault(); dz.hidden = true; loadFile(e.dataTransfer.files[0]); });
+$("procBtn").addEventListener("click", () => {
+  tumorData = null; $("tumorChip").textContent = "Procedural tumor";
+  $("tumorNote").innerHTML = 'Using a procedural tumor. Load a <code>sim_data_&lt;patient&gt;.json</code> file to shape the tumor from your U-Net centroids, one cluster per MRI slice.';
+  $("fileErr").hidden = true; reset(); setView("3d"); updateHud();
+});
+
+function resize() {
+  const w = vp.clientWidth, h = vp.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (composer) { composer.setSize(w, h); if (bloom) bloom.resolution.set(w, h); }
+}
+new ResizeObserver(resize).observe(vp);
+
+/* ---------- main loop ---------- */
+buildEnvironment(); reset();
+// warm up so the first frame already shows bots at work
+for (let i = 0; i < 480; i++) { const dt = 1 / 15; simTime += dt; bots.forEach(b => updateBot(b, dt)); updateCells(dt); if (i % 15 === 0) series.push([simTime, stats().left]); }
+let last = performance.now(), hudT = 0, seriesT = 0;
+function loop(now) {
+  const real = Math.min(0.05, (now - last) / 1000); last = now;
+  const speed = +$("speed").value;
+  if (playing) {
+    let left = real * speed;
+    while (left > 1e-4) { const dt = Math.min(left, 1 / 30); simTime += dt; bots.forEach(b => updateBot(b, dt)); updateCells(dt); left -= dt; }
+    seriesT += real * speed; if (seriesT > 1) { seriesT = 0; series.push([simTime, stats().left]); if (series.length > 600) series.splice(0, series.length - 600); }
+  }
+  const t = now / 1000;
+  bots.forEach(b => drawBot(b, t));
+  // flowing blood cells and drifting specks
+  const rbc = env.userData.rbc, M = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1);
+  if (rbc && !reduceMotion) {
+    rbc.userData.items.forEach((it, i) => {
+      if (playing) it.t = (it.t + it.sp * real * speed * 0.6) % 1;
+      const vc = vesselCurves[it.c], p = vc.curve.getPointAt(it.t);
+      p.addScaledVector(it.off, vc.r * 0.55);
+      q.setFromEuler(new THREE.Euler(it.rot + t, it.rot, 0)); M.compose(p, q, sc); rbc.setMatrixAt(i, M);
+    });
+    rbc.instanceMatrix.needsUpdate = true;
+  }
+  if (env.userData.specks && !reduceMotion) env.userData.specks.rotation.y += real * 0.01;
+  injector.material.opacity = 0.6 + Math.sin(t * 3) * 0.25;
+  const sb = bots[selected];
+  if (sb && sb.released) { selRing.visible = true; selRing.position.copy(sb.g.position); selRing.position.y -= 3.6; selRing.scale.setScalar(1 + Math.sin(t * 4) * 0.06); } else selRing.visible = false;
+  if (follow && sb && sb.released) { const off = camera.position.clone().sub(controls.target); controls.target.lerp(sb.g.position, 0.1); camera.position.copy(controls.target).add(off); }
+  controls.update();
+  if (composer) composer.render(); else renderer.render(scene, camera);
+  hudT += real; if (hudT > 0.25) { hudT = 0; updateHud(); }
+  requestAnimationFrame(loop);
+}
+resize(); setView("3d"); updateHud(); requestAnimationFrame(loop);
+window.__sim = { stats, bots, cells, healthy, get simTime() { return simTime; } };
+})();
+</script>
+
+</body></html>
